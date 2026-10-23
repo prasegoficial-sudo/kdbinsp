@@ -1,0 +1,152 @@
+/**
+ * Inspeção de empilhadeira – Komatsu
+ * Servidor de sincronização (Google Apps Script)
+ *
+ * COMO USAR (uma vez só):
+ * 1) Crie uma planilha no Google Planilhas (ex.: "Inspeções Komatsu").
+ * 2) Menu Extensões > Apps Script. Apague o código que aparecer e cole TODO este arquivo.
+ * 3) Troque o texto da linha CODIGO abaixo por um código da sua equipe (ex.: KOM-2026-EQUIPE).
+ * 4) Clique em Implantar > Nova implantação > tipo "Aplicativo da Web".
+ *      Executar como: Eu
+ *      Quem tem acesso: Qualquer pessoa
+ *    Autorize o acesso ao Drive e à Planilha quando o Google pedir.
+ * 5) Copie o URL que termina em /exec e cole no aplicativo (aba Sincronização),
+ *    junto com o mesmo código. Faça o mesmo em cada aparelho.
+ *
+ * Os dados ficam na aba "Inspecoes" da sua planilha e as fotos na pasta
+ * "Inspecoes Komatsu - Fotos" do seu Google Drive.
+ */
+
+const CODIGO = 'TROQUE-ESTE-CODIGO';
+
+const PASTA = 'Inspecoes Komatsu - Fotos';
+const ABA = 'Inspecoes';
+const COLS = ['id', 'atu', 'criada', 'tag', 'setor', 'cls', 'obs', 'data', 'aparelho', 'status', 'deleted', 'fotos'];
+
+function aba_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(ABA);
+  if (!sh) {
+    sh = ss.insertSheet(ABA);
+    sh.appendRow(COLS);
+    sh.setFrozenRows(1);
+    sh.getRange('A1:L1').setFontWeight('bold').setBackground('#003D9E').setFontColor('#FFFFFF');
+    // colunas de texto: evita que o Google converta datas/números
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('D:I').setNumberFormat('@');
+    sh.getRange('L:L').setNumberFormat('@');
+  }
+  return sh;
+}
+
+function pasta_() {
+  const it = DriveApp.getFoldersByName(PASTA);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(PASTA);
+}
+
+function saida_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function linhas_(sh) {
+  const n = sh.getLastRow();
+  if (n < 2) return [];
+  return sh.getRange(2, 1, n - 1, COLS.length).getValues();
+}
+
+function paraObj_(row) {
+  const o = {};
+  COLS.forEach(function (c, i) { o[c] = row[i]; });
+  o.id = String(o.id);
+  o.atu = Number(o.atu);
+  o.criada = Number(o.criada);
+  o.deleted = (o.deleted === true || o.deleted === 'true' || o.deleted === 'TRUE');
+  o.fotos = o.fotos ? JSON.parse(o.fotos) : [];
+  return o;
+}
+
+function push_(recs) {
+  const sh = aba_();
+  const rows = linhas_(sh);
+  const idx = {};
+  rows.forEach(function (r, i) { idx[String(r[0])] = { linha: i + 2, atu: Number(r[1]) }; });
+  const pasta = pasta_();
+  const fotosPorId = {};
+  let n = 0;
+  recs.forEach(function (r) {
+    const ex = idx[r.id];
+    if (ex && ex.atu >= r.atu) return; // o servidor já tem versão igual ou mais nova
+    const fotos = (r.fotos || []).map(function (f, i) {
+      if (!f) return null;
+      if (f.data) {
+        const b64 = String(f.data).split(',')[1];
+        const blob = Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', 'foto_' + r.id + '_' + (i + 1) + '.jpg');
+        const file = pasta.createFile(blob);
+        return { id: file.getId(), w: f.w, h: f.h };
+      }
+      return { id: f.id, w: f.w, h: f.h };
+    });
+    fotosPorId[r.id] = fotos;
+    const vals = [r.id, r.atu, r.criada, r.tag, r.setor, r.cls, r.obs, r.data, r.aparelho, r.status, !!r.deleted, JSON.stringify(fotos)];
+    if (ex) {
+      sh.getRange(ex.linha, 1, 1, COLS.length).setValues([vals]);
+    } else {
+      sh.appendRow(vals);
+      idx[r.id] = { linha: sh.getLastRow(), atu: r.atu };
+    }
+    n++;
+  });
+  return { ok: true, n: n, fotos: fotosPorId };
+}
+
+function list_(since) {
+  const out = [];
+  linhas_(aba_()).forEach(function (row) {
+    const o = paraObj_(row);
+    if (o.atu > since) out.push(o);
+  });
+  return { ok: true, records: out };
+}
+
+function get_(id) {
+  const sh = aba_();
+  const rows = linhas_(sh);
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(id)) {
+      const o = paraObj_(rows[i]);
+      o.fotos = o.fotos.map(function (f) {
+        if (!f) return null;
+        const blob = DriveApp.getFileById(f.id).getBlob();
+        return { data: 'data:image/jpeg;base64,' + Utilities.base64Encode(blob.getBytes()), w: f.w, h: f.h, sid: f.id };
+      });
+      return { ok: true, record: o };
+    }
+  }
+  return { erro: 'nao encontrado' };
+}
+
+function doPost(e) {
+  try {
+    const d = JSON.parse(e.postData.contents);
+    if (d.codigo !== CODIGO) return saida_({ erro: 'codigo' });
+    if (d.action === 'ping') return saida_({ ok: true });
+    if (d.action === 'list') return saida_(list_(Number(d.since || 0)));
+    if (d.action === 'get') return saida_(get_(d.id));
+    if (d.action === 'push') {
+      const lock = LockService.getScriptLock();
+      lock.waitLock(30000);
+      try {
+        return saida_(push_(d.records || []));
+      } finally {
+        lock.releaseLock();
+      }
+    }
+    return saida_({ erro: 'acao desconhecida' });
+  } catch (err) {
+    return saida_({ erro: String(err) });
+  }
+}
+
+function doGet() {
+  return saida_({ ok: true, servico: 'Inspecao de empilhadeira - Komatsu' });
+}
