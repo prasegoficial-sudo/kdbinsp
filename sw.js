@@ -1,4 +1,4 @@
-const V = 'komatsu-v1';
+const V = 'komatsu-v2';
 const ARQ = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -28,6 +28,7 @@ main{max-width:620px;margin:0 auto;padding:14px}
 .card label.l:not(:first-child){margin-top:16px}
 input[type=text],textarea{width:100%;min-height:56px;padding:14px;font-size:1.2rem;border:2px solid var(--line);border-radius:10px;background:#fff;color:var(--tx);font-family:inherit}
 textarea{min-height:120px;resize:vertical}
+select{width:100%;min-height:56px;padding:14px;font-size:1.1rem;border:2px solid var(--line);border-radius:10px;background:#fff;color:var(--tx);font-family:inherit;margin-bottom:12px}
 input::placeholder,textarea::placeholder{color:#6b7a93}
 .opt{position:relative;display:flex;align-items:center;gap:12px;padding:14px;border:2px solid var(--line);border-radius:10px;background:#fff;font-weight:800;margin-bottom:10px;min-height:62px;cursor:pointer}
 .opt:last-child{margin-bottom:0}
@@ -112,7 +113,11 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
   </section>
 
   <section id="s-salvas" hidden>
-    <button class="b alt" id="btnGeral" style="margin-bottom:14px">Exportar planilha geral (Excel)</button>
+    <div class="card">
+      <label class="l" for="fPer">Relatório geral (todas as inspeções com fotos)</label>
+      <select id="fPer"><option value="todas">Todas as inspeções</option><option value="hoje">Somente hoje</option><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option></select>
+      <button class="b" id="btnGeral">Gerar relatório geral (PDF + Excel)</button>
+    </div>
     <div id="lista"></div>
   </section>
 
@@ -724,8 +729,7 @@ async function salvar(){
 $('btnSalvar').onclick=()=>salvar().catch(e=>aviso('Erro ao salvar: '+e.message));
 
 /* ---------- PDF ---------- */
-async function gerarPDF(r){
-  const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'mm',format:'a4'});
+function desenharInspecao(doc,r,idx){
   const NAVY=[11,20,38],GRAY=[68,81,106],LIGHT=[243,246,251],LINE=[200,209,224];
   const ML=14,CW=182,BOT=278,ci=clsInfo(r.cls),proto=protocolo(r);
   const lw=44,lh=lw*LOGO.h/LOGO.w;
@@ -736,7 +740,7 @@ async function gerarPDF(r){
   doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(...BLUE);
   doc.text('RELATÓRIO DE INSPEÇÃO / INSPECTION REPORT',ML+CW,13,{align:'right'});
   doc.setFont('helvetica','normal');doc.setTextColor(...GRAY);
-  doc.text('Ref. '+proto,ML+CW,18,{align:'right'});
+  doc.text('Ref. '+proto+(idx?'  ·  '+idx:''),ML+CW,18,{align:'right'});
   doc.setFillColor(...BLUE);doc.rect(ML,24,CW,1,'F');
   doc.setFont('helvetica','bold');doc.setFontSize(19);doc.setTextColor(...NAVY);
   doc.text('Inspeção de empilhadeira',ML,38);
@@ -785,15 +789,76 @@ async function gerarPDF(r){
       doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(...GRAY);doc.text('Foto / Photo '+(o.i+1),x,y+H+4.5);
     });
   }
-  const N=doc.getNumberOfPages(),agora=fmtISO(Date.now());
+}
+function rodape(doc,titulo){
+  const ML=14,CW=182,LINE=[200,209,224],GRAY=[68,81,106],N=doc.getNumberOfPages(),agora=fmtISO(Date.now());
   for(let p=1;p<=N;p++){
     doc.setPage(p);doc.setDrawColor(...LINE);doc.setLineWidth(0.3);doc.line(ML,284,ML+CW,284);
     doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
-    doc.text('Komatsu  ·  Relatório de inspeção de empilhadeira',ML,289);
+    doc.text('Komatsu  ·  '+titulo,ML,289);
     doc.text('Gerado em / Generated '+agora,ML+CW/2+14,289,{align:'center'});
     doc.text('Página / Page '+p+' / '+N,ML+CW,289,{align:'right'});
   }
+}
+async function gerarPDF(r){
+  const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'mm',format:'a4'});
+  desenharInspecao(doc,r,'');
+  rodape(doc,'Relatório de inspeção de empilhadeira');
   return new File([doc.output('blob')],nomeBase(r)+'.pdf',{type:'application/pdf'});
+}
+async function gerarPDFGeral(lista,periodo){
+  const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'mm',format:'a4'});
+  const NAVY=[11,20,38],GRAY=[68,81,106],LIGHT=[243,246,251],ML=14,CW=182,BOT=278;
+  const L=lista.slice().sort((a,b)=>a.criada-b.criada),N=L.length,lw=44,lh=lw*LOGO.h/LOGO.w;
+  const pag=()=>{doc.addPage();doc.addImage(LOGO.src,'PNG',ML,9,30,30*LOGO.h/LOGO.w);
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(...GRAY);
+    doc.text('RELATÓRIO GERAL / GENERAL REPORT',ML+CW,13,{align:'right'});
+    doc.setFillColor(...BLUE);doc.rect(ML,19,CW,0.6,'F');return 28};
+  doc.addImage(LOGO.src,'PNG',ML,10,lw,lh);
+  doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(...BLUE);
+  doc.text('RELATÓRIO GERAL / GENERAL REPORT',ML+CW,13,{align:'right'});
+  doc.setFont('helvetica','normal');doc.setTextColor(...GRAY);doc.text(periodo,ML+CW,18,{align:'right'});
+  doc.setFillColor(...BLUE);doc.rect(ML,24,CW,1,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(19);doc.setTextColor(...NAVY);doc.text('Relatório geral de inspeções',ML,38);
+  doc.setFont('helvetica','normal');doc.setFontSize(10.5);doc.setTextColor(...GRAY);
+  doc.text('Gerado em / Generated '+fmtISO(Date.now())+'  ·  '+N+' inspeção(ões) / inspections',ML,45);
+  let y=58;
+  const secao=t=>{doc.setFillColor(...BLUE);doc.rect(ML,y-3.2,2.4,4.2,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(...NAVY);doc.text(t,ML+5,y);y+=6};
+  secao('RESUMO POR CLASSIFICAÇÃO / SUMMARY BY CONDITION');
+  const cwc=(CW-12)/4;
+  CLS.forEach((ci,i)=>{
+    const x=ML+i*(cwc+4),q=L.filter(r=>r.cls===ci.v).length;
+    doc.setFillColor(...ci.rgb);doc.roundedRect(x,y,cwc,26,2.5,2.5,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(20);doc.text(String(q),x+cwc/2,y+12,{align:'center'});
+    doc.setFontSize(7.5);doc.text(ci.v,x+cwc/2,y+18.5,{align:'center'});
+    doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.text(ci.en,x+cwc/2,y+22.5,{align:'center'});
+  });
+  y+=26+12;
+  secao('ÍNDICE DAS INSPEÇÕES / INDEX');
+  const cab=()=>{doc.setFillColor(...BLUE);doc.rect(ML,y,CW,8,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(255,255,255);
+    [['Nº',2],['TAG',13],['SETOR / DEPARTMENT',52],['CLASSIFICAÇÃO / CONDITION',98],['DATA / DATE',154]].forEach(c=>doc.text(c[0],ML+c[1],y+5.4));y+=8};
+  cab();
+  L.forEach((r,i)=>{
+    if(y+7>BOT){y=pag();cab()}
+    const ci=clsInfo(r.cls);
+    if(i%2===0){doc.setFillColor(...LIGHT);doc.rect(ML,y,CW,7,'F')}
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...NAVY);
+    doc.text(String(i+1),ML+2,y+4.8);
+    doc.text(doc.splitTextToSize(String(rotulo(r)),36)[0],ML+13,y+4.8);
+    doc.text(doc.splitTextToSize(r.setor||'-',42)[0],ML+52,y+4.8);
+    doc.setFillColor(...ci.rgb);doc.circle(ML+99.5,y+3.5,1.6,'F');
+    doc.text(doc.splitTextToSize(r.cls||'-',48)[0],ML+103,y+4.8);
+    doc.text(fmtISO(r.criada),ML+154,y+4.8);
+    y+=7;
+  });
+  for(let i=0;i<N;i++){
+    await new Promise(r=>setTimeout(r,0));
+    doc.addPage();desenharInspecao(doc,L[i],'Inspeção '+(i+1)+' de '+N);
+  }
+  rodape(doc,'Relatório geral de inspeções de empilhadeira');
+  return new File([doc.output('blob')],'relatorio_geral_'+fmtISO(Date.now()).slice(0,10)+'.pdf',{type:'application/pdf'});
 }
 
 /* ---------- Excel ---------- */
@@ -825,6 +890,49 @@ function addRegistro(wb,recs,nome){
   }
   w2.autoFilter='A1:I1';
   return w2;
+}
+function xlsxFotos(wb,ws,n,fl){
+  for(let k=0;k<fl.length;k+=2){
+    const s=n;for(let j=0;j<10;j++)ws.getRow(s+j).height=19.5;
+    [fl[k],fl[k+1]].forEach((o,c)=>{
+      if(!o)return;
+      const c1=c?'D':'B',c2=c?'E':'C',cx=c?3:1;
+      ws.mergeCells(c1+s+':'+c2+(s+9));
+      const m=ws.getCell(c1+s);m.fill=xFill(XC.light);m.border=xBord;
+      const kx=Math.min(350/o.f.w,240/o.f.h),iw=o.f.w*kx,ih=o.f.h*kx;
+      ws.addImage(wb.addImage({base64:o.f.data,extension:'jpeg'}),
+        {tl:{col:cx+((374-iw)/2)/145,row:(s-1)+((260-ih)/2)/26},ext:{width:iw,height:ih}});
+      const cap=ws.getCell(c1+(s+10));cap.value='Foto / Photo '+(o.i+1);cap.font=XF(9,XC.gray);cap.alignment={indent:1};
+    });
+    ws.getRow(s+10).height=18;ws.getRow(s+11).height=10;n=s+12;
+  }
+  return n;
+}
+function addFotosSheet(wb,lista){
+  const ws=wb.addWorksheet('Fotos',{views:[{showGridLines:false}],
+    pageSetup:{paperSize:9,orientation:'portrait',fitToPage:true,fitToWidth:1,fitToHeight:0,horizontalCentered:true,
+      margins:{left:.5,right:.5,top:.5,bottom:.7,header:.3,footer:.3}}});
+  ws.columns=[{width:2},{width:20},{width:32},{width:20},{width:32},{width:2}];
+  const L=lista.slice().sort((a,b)=>a.criada-b.criada);
+  let n=1;
+  L.forEach((r,i)=>{
+    if(i>0)ws.getRow(n-1).addPageBreak();
+    const ci=clsInfo(r.cls);
+    ws.mergeCells('B'+n+':E'+n);
+    const c=ws.getCell('B'+n);
+    c.value=(i+1)+'/'+L.length+'  ·  TAG '+rotulo(r)+'  ·  '+(r.setor||'-')+'  ·  '+r.cls+'  ·  '+fmtISO(r.criada);
+    c.font=XF(10,XC.white,1);c.fill=xFill(ci.argb);c.alignment={vertical:'middle',indent:1,wrapText:true};
+    ws.getRow(n).height=28;n++;
+    const t=r.obs||'Nenhuma observação registrada.';
+    ws.mergeCells('B'+n+':E'+n);
+    const o=ws.getCell('B'+n);o.value=t;o.font=XF(10,r.obs?XC.navy:XC.gray);
+    o.alignment={wrapText:true,vertical:'top',indent:1};o.border=xBord;
+    ws.getRow(n).height=Math.max(30,Math.ceil(t.length/88)*14+10);n++;
+    ws.getRow(n).height=8;n++;
+    n=xlsxFotos(wb,ws,n,r.fotos.map((f,k)=>f&&{f,i:k}).filter(Boolean));
+    n++;
+  });
+  return ws;
 }
 async function gerarXLSX(r){
   const wb=new ExcelJS.Workbook();wb.creator='Komatsu';wb.title='Inspeção de empilhadeira';
@@ -870,20 +978,7 @@ async function gerarXLSX(r){
   const fl=r.fotos.map((f,i)=>f&&{f,i}).filter(Boolean);
   if(fl.length){
     h(n,14);n++;sec('REGISTRO FOTOGRÁFICO / PHOTO RECORD');h(n,8);n++;
-    for(let k=0;k<fl.length;k+=2){
-      const s=n;for(let j=0;j<10;j++)h(s+j,19.5);
-      [fl[k],fl[k+1]].forEach((o,c)=>{
-        if(!o)return;
-        const c1=c?'D':'B',c2=c?'E':'C',cx=c?3:1;
-        ws.mergeCells(c1+s+':'+c2+(s+9));
-        const m=ws.getCell(c1+s);m.fill=fill(C.light);m.border=bord;
-        const kx=Math.min(350/o.f.w,240/o.f.h),iw=o.f.w*kx,ih=o.f.h*kx;
-        ws.addImage(wb.addImage({base64:o.f.data,extension:'jpeg'}),
-          {tl:{col:cx+((374-iw)/2)/145,row:(s-1)+((260-ih)/2)/26},ext:{width:iw,height:ih}});
-        set(c1+(s+10),'Foto / Photo '+(o.i+1),{font:F(9,C.gray),al:{indent:1}});
-      });
-      h(s+10,18);h(s+11,10);n=s+12;
-    }
+    n=xlsxFotos(wb,ws,n,fl);
   }
   ws.mergeCells('B'+n+':E'+n);
   set('B'+n,'Komatsu  ·  Relatório de inspeção de empilhadeira  ·  Generated '+fmtISO(Date.now()),{font:F(8,C.gray),al:{horizontal:'center'}});
@@ -914,6 +1009,7 @@ async function gerarXLSXGeral(lista){
   rs.getCell('C11').value={formula:'SUM(C7:C10)',result:lista.length};rs.getCell('C11').font=XF(11,XC.navy,1);rs.getCell('C11').alignment={horizontal:'center'};
   ['B11','C11'].forEach(a=>{rs.getCell(a).border=xBord;rs.getCell(a).fill=xFill(XC.light)});rs.getRow(11).height=24;
   addRegistro(wb,lista,'Registro');
+  addFotosSheet(wb,lista);
   const buf=await wb.xlsx.writeBuffer();
   return new File([buf],'inspecoes_geral_'+fmtISO(Date.now()).slice(0,10)+'.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
@@ -923,6 +1019,35 @@ function fecharSheet(){$('sheet').style.display='none'}
 function abrirSheet(h){$('sheetBox').innerHTML=h;$('sheet').style.display='flex'}
 $('sheet').addEventListener('click',e=>{if(e.target.id==='sheet')fecharSheet()});
 async function marcarEnviada(rec){rec.status='enviada';await salvarRec(rec);await renderLista();sincronizar(false)}
+function painelEnvio(o){
+  const imgs=o.imgs||[],base={title:o.assunto,text:o.texto};
+  const pode=navigator.share&&navigator.canShare;
+  const opcoes=[{nome:'fotos + PDF + Excel',files:[...imgs,o.pdf,o.xl]},{nome:'fotos + PDF',files:[...imgs,o.pdf]},
+    {nome:'PDF + Excel',files:[o.pdf,o.xl]},{nome:'PDF',files:[o.pdf]}]
+    .filter(x=>imgs.length||!/fotos/.test(x.nome)).map(x=>({...x,...base}));
+  const pacote=pode?opcoes.find(x=>navigator.canShare(x)):null;
+  const fo={...base,files:imgs},fotosOk=pode&&imgs.length&&navigator.canShare(fo)?fo:null;
+  const wa='https://wa.me/?text='+encodeURIComponent(o.texto);
+  const em='mailto:?subject='+encodeURIComponent(o.assunto)+'&body='+encodeURIComponent(o.texto);
+  abrirSheet('<h3>'+esc(o.titulo)+'</h3>'+
+    (navigator.onLine?'':'<p class="warn">Sem internet agora. Você pode baixar os arquivos e enviar quando a conexão voltar.</p>')+
+    (pacote?'<button class="b" id="shShare">Compartilhar '+pacote.nome+'</button>'+(fotosOk?'<button class="b alt" id="shFotos">Compartilhar só as fotos</button>':'')
+      :'<p class="warn">Este navegador não permite compartilhar arquivos direto. Use as opções abaixo.</p>')+
+    '<a class="b wa" id="shWa" href="'+wa+'" target="_blank" rel="noopener">WhatsApp (mensagem)</a>'+
+    '<a class="b alt" id="shMail" href="'+em+'">E-mail (mensagem)</a>'+
+    '<button class="b alt" id="shDl">Baixar '+(imgs.length?'PDF, Excel e fotos':'PDF e Excel')+'</button>'+
+    '<p class="mut" id="shErr" style="margin-top:12px">WhatsApp e E-mail por esses botões levam só o texto. Para enviar com os arquivos, use Compartilhar (e escolha o WhatsApp ou o e-mail na tela que abrir) ou baixe e anexe.</p>'+
+    '<button class="b alt" id="shClose">Fechar</button>');
+  $('shClose').onclick=fecharSheet;
+  $('shDl').onclick=()=>{[o.pdf,o.xl,...imgs].forEach((f,i)=>setTimeout(()=>baixar(f),i*700))};
+  $('shWa').onclick=$('shMail').onclick=()=>{if(o.aoEnviar)o.aoEnviar()};
+  const comp=async p=>{
+    try{await navigator.share(p);if(o.aoEnviar)await o.aoEnviar();fecharSheet()}
+    catch(e){if(e.name!=='AbortError')$('shErr').textContent='Não foi possível compartilhar ('+e.name+'). Use as outras opções.'}
+  };
+  if(pacote)$('shShare').onclick=()=>comp(pacote);
+  if(fotosOk)$('shFotos').onclick=()=>comp(fo);
+}
 async function enviar(rec){
   abrirSheet('<p class="mut">Preparando PDF e Excel…</p>');
   let pdf,xl;
@@ -930,34 +1055,25 @@ async function enviar(rec){
   catch(e){abrirSheet('<p>Erro ao preparar os arquivos: '+esc(e.message)+'</p><button class="b alt" id="shClose">Fechar</button>');$('shClose').onclick=fecharSheet;return}
   const texto='Inspeção de empilhadeira – Komatsu\nTAG: '+rotulo(rec)+'\nSetor: '+rec.setor+'\nClassificação: '+rec.cls+
     (rec.obs?'\nObs.: '+rec.obs:'')+'\nData: '+fmtISO(rec.criada);
-  const base={title:'Inspeção de empilhadeira',text:texto};
-  const imgs=rec.fotos.map((f,i)=>f&&dataParaArquivo(f.data,'foto_'+(i+1)+'.jpg')).filter(Boolean);
-  const pode=navigator.share&&navigator.canShare;
-  const opcoes=[{nome:'fotos + PDF + Excel',files:[...imgs,pdf,xl]},{nome:'fotos + PDF',files:[...imgs,pdf]},
-    {nome:'PDF + Excel',files:[pdf,xl]},{nome:'PDF',files:[pdf]}].map(o=>({...o,...base}));
-  const pacote=pode?opcoes.find(o=>navigator.canShare(o)):null;
-  const fo={...base,files:imgs},fotosOk=pode&&imgs.length&&navigator.canShare(fo)?fo:null;
-  const wa='https://wa.me/?text='+encodeURIComponent(texto);
-  const em='mailto:?subject='+encodeURIComponent('Inspeção de empilhadeira - TAG '+rotulo(rec))+'&body='+encodeURIComponent(texto);
-  abrirSheet('<h3>Enviar inspeção</h3>'+
-    (navigator.onLine?'':'<p class="warn">Sem internet agora. Você pode baixar os arquivos e enviar quando a conexão voltar.</p>')+
-    (pacote?'<button class="b" id="shShare">Compartilhar '+pacote.nome+'</button>'+(fotosOk?'<button class="b alt" id="shFotos">Compartilhar só as fotos</button>':'')
-      :'<p class="warn">Este navegador não permite compartilhar arquivos direto. Use as opções abaixo.</p>')+
-    '<a class="b wa" id="shWa" href="'+wa+'" target="_blank" rel="noopener">WhatsApp (mensagem)</a>'+
-    '<a class="b alt" id="shMail" href="'+em+'">E-mail (mensagem)</a>'+
-    '<button class="b alt" id="shDl">Baixar PDF, Excel e fotos</button>'+
-    '<p class="mut" id="shErr" style="margin-top:12px">WhatsApp e E-mail por esses botões levam só o texto. Para enviar com fotos, use Compartilhar (e escolha o WhatsApp ou o e-mail na tela que abrir) ou baixe e anexe.</p>'+
-    '<button class="b alt" id="shClose">Fechar</button>');
-  $('shClose').onclick=fecharSheet;
-  $('shDl').onclick=()=>{[pdf,xl,...imgs].forEach((f,i)=>setTimeout(()=>baixar(f),i*700))};
-  $('shWa').onclick=$('shMail').onclick=()=>{marcarEnviada(rec)};
-  const comp=async p=>{
-    try{await navigator.share(p);await marcarEnviada(rec);fecharSheet()}
-    catch(e){if(e.name!=='AbortError')$('shErr').textContent='Não foi possível compartilhar ('+e.name+'). Use as outras opções.'}
-  };
-  if(pacote)$('shShare').onclick=()=>comp(pacote);
-  if(fotosOk)$('shFotos').onclick=()=>comp(fo);
+  painelEnvio({titulo:'Enviar inspeção',pdf,xl,imgs:rec.fotos.map((f,i)=>f&&dataParaArquivo(f.data,'foto_'+(i+1)+'.jpg')).filter(Boolean),
+    texto,assunto:'Inspeção de empilhadeira - TAG '+rotulo(rec),aoEnviar:()=>marcarEnviada(rec)});
 }
+async function gerarGeral(){
+  const per=$('fPer').value,todas=await visiveis();
+  const ini=per==='todas'?0:per==='hoje'?new Date().setHours(0,0,0,0):Date.now()-Number(per)*86400000;
+  const lista=todas.filter(r=>r.criada>=ini);
+  if(!lista.length){aviso('Não há inspeções neste período.');return}
+  const txtPer=$('fPer').selectedOptions[0].textContent;
+  abrirSheet('<p class="mut">Gerando o relatório geral com '+lista.length+' inspeção(ões) e fotos… isso pode levar alguns instantes.</p>');
+  await new Promise(r=>setTimeout(r,60));
+  let pdf,xl;
+  try{pdf=await gerarPDFGeral(lista,txtPer);xl=await gerarXLSXGeral(lista)}
+  catch(e){abrirSheet('<p>Erro ao gerar o relatório geral: '+esc(e.message)+'</p><button class="b alt" id="shClose">Fechar</button>');$('shClose').onclick=fecharSheet;return}
+  painelEnvio({titulo:'Relatório geral pronto',pdf,xl,imgs:[],
+    texto:'Relatório geral de inspeções de empilhadeira – Komatsu\nPeríodo: '+txtPer+'\nTotal: '+lista.length+' inspeção(ões)',
+    assunto:'Relatório geral de inspeções - Komatsu'});
+}
+$('btnGeral').onclick=()=>gerarGeral().catch(e=>aviso('Erro: '+e.message));
 
 /* ---------- Lista ---------- */
 async function renderLista(){
@@ -989,11 +1105,6 @@ $('lista').addEventListener('click',async e=>{
     else await enviar(rec);
   }catch(err){aviso('Erro: '+err.message)}
 });
-$('btnGeral').onclick=async()=>{
-  try{const l=await visiveis();if(!l.length){aviso('Não há inspeções salvas.');return}
-    aviso('Gerando planilha geral…');baixar(await gerarXLSXGeral(l));aviso('Planilha geral gerada.')}
-  catch(e){aviso('Erro: '+e.message)}
-};
 
 /* ---------- Sincronização entre aparelhos ---------- */
 let sincronizando=false;
